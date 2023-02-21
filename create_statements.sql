@@ -1,10 +1,4 @@
 drop table if exists shipping_country_rates cascade;
-drop table if exists shipping_agreement  cascade;
-drop table if exists shipping_transfer  cascade;
-drop table if exists shipping_info  cascade;
-drop table if exists shipping_status  cascade;
-drop table if exists shipping_datamart  cascade;
-
 create table shipping_country_rates 
 (
 	id serial primary key,
@@ -12,7 +6,7 @@ create table shipping_country_rates
 	shipping_country_base_rate numeric(14, 3)
 );
 
-
+drop table if exists shipping_agreement  cascade;
 create table shipping_agreement (
 	agreementid bigint primary key,
 	agreement_number text,
@@ -20,7 +14,7 @@ create table shipping_agreement (
 	agreement_commission numeric(14,2)
 );
 
-
+drop table if exists shipping_transfer  cascade;
 create table shipping_transfer (
 	id serial primary key,
 	transfer_type text,
@@ -28,6 +22,7 @@ create table shipping_transfer (
 	shipping_transfer_rate numeric(14, 3)
 );
 
+drop table if exists shipping_info  cascade;
 create table shipping_info (
 	shippingid serial primary key,
 	vendorid bigint,
@@ -42,6 +37,7 @@ create table shipping_info (
 	foreign key (agreement_id) references shipping_agreement (agreementid) on update cascade
 );
 
+drop table if exists shipping_status  cascade;
 create table shipping_status(
 	shippingid bigint primary key,
 	status text ,
@@ -50,15 +46,24 @@ create table shipping_status(
 	shipping_end_fact_datetime timestamp
 );
 
-create table shipping_datamart (
-	shippingid bigint,
-	vendorid bigint,
-	transfer_type text,
-	full_day_at_shipping bigint,
-	is_delay int,
-	is_shipping_finish int,
-	delay_day_at_shipping bigint,
-	payment_amount numeric(14, 2),
-	vat numeric(14, 2),
-	profit numeric(14, 2)
-);
+create or replace view shipping_datamart as
+select
+	si.shippingid,
+	si.vendorid,
+	st.transfer_type,
+	date_part('day', (shipping_end_fact_datetime-shipping_start_fact_datetime)) as full_day_at_shipping,
+	case when shipping_end_fact_datetime>shipping_start_fact_datetime then 1 else 0 end as is_delay,
+	case when status='finished' then 1 else 0 end as is_shipping_finish,
+	case 
+		when shipping_end_fact_datetime>shipping_plan_datetime 
+			then date_part('day', ss.shipping_end_fact_datetime-si.shipping_plan_datetime)
+		else 0
+	end as delay_day_at_shipping,
+	si.payment_amount,
+	payment_amount*(scr.shipping_country_base_rate+agreement_rate+st.shipping_transfer_rate) as vat,
+	payment_amount*sa.agreement_commission as profit
+from shipping_info si 
+	 inner join shipping_status ss on si.shippingid = ss.shippingid
+	 inner join shipping_transfer st on si.transfer_type_id =st.id 
+	 inner join shipping_country_rates scr on si.shipping_country_id = scr.id 
+	 inner join shipping_agreement sa on si.agreement_id = sa.agreementid ;
